@@ -1,104 +1,106 @@
-# Environmental Compliance Portal (case study)
+# Portal de Conformidade Ambiental (estudo de caso)
 
-A multi-tenant web portal where an environmental team drafts, reviews and publishes monitoring content, and each client sees only what was published for its own projects.
+**Português** · [English](README.en.md)
 
-Built during my work at Toveri, an environmental consultancy that monitors offshore operations. Documentation only: no source code, client names, data or infrastructure identifiers.
+Um portal web multi-tenant em que uma equipe ambiental redige, revisa e publica conteúdo de monitoramento, e cada cliente vê apenas o que foi publicado para os seus próprios projetos.
 
-> This repository is documentation only. The source code, data and infrastructure belong to the employer and are not published here. See [What is intentionally omitted](#what-is-intentionally-omitted).
+Desenvolvido durante meu trabalho na Toveri, uma consultoria ambiental que monitora operações offshore. Apenas documentação: sem código-fonte, nomes de clientes, dados ou identificadores de infraestrutura.
 
-## Problem
+> Este repositório contém apenas documentação. O código-fonte, os dados e a infraestrutura pertencem ao empregador e não estão publicados aqui. Veja [O que foi omitido intencionalmente](#o-que-foi-omitido-intencionalmente).
 
-An environmental consultancy that monitors offshore seismic surveys has to track, per project: licence conditions and their evidence, several monitoring programs (marine fauna, passive acoustics, pollution control, crew environmental training, among others), indicators, weekly updates, documents and the spreadsheets that field teams send every week.
+## Problema
 
-Two audiences read the same information with very different rights:
+Uma consultoria ambiental que monitora pesquisas sísmicas offshore precisa acompanhar, por projeto: condicionantes de licença e suas evidências, diversos programas de monitoramento (fauna marinha, acústica passiva, controle de poluição, treinamento ambiental de tripulação, entre outros), indicadores, atualizações semanais, documentos e as planilhas que as equipes de campo enviam toda semana.
 
-- the internal team needs to create, edit, review and publish;
-- the client (the survey operator) must see only content that was reviewed and published for its own projects, and never another client's data, never a draft.
+Dois públicos leem as mesmas informações com direitos muito diferentes:
 
-Before the portal this lived in e-mails, shared folders and spreadsheets, with no single place that answered "what has actually been delivered to this client, and when".
+- a equipe interna precisa criar, editar, revisar e publicar;
+- o cliente (a operadora da pesquisa) deve ver apenas conteúdo revisado e publicado para os seus próprios projetos, nunca dados de outro cliente e nunca um rascunho.
 
-## My role
+Antes do portal, isso ficava espalhado em e-mails, pastas compartilhadas e planilhas, sem um lugar único que respondesse "o que de fato foi entregue a este cliente, e quando".
 
-Sole developer: design, data model, implementation, tests, Azure deployment and day-to-day operation. All 309 commits in the repository (30 Jul to 18 Nov 2026, all branches) are mine. I used AI-assisted development (Claude Code) throughout; design decisions, review and production responsibility are mine.
+## Meu papel
 
-## Architecture
+Desenvolvedor único: design, modelo de dados, implementação, testes, deploy no Azure e operação do dia a dia. Todos os 309 commits do repositório (30 jul a 18 nov 2026, todas as branches) são meus. Usei desenvolvimento assistido por IA (Claude Code) durante todo o projeto; as decisões de design, a revisão e a responsabilidade pela produção são minhas.
+
+## Arquitetura
 
 ```mermaid
 flowchart LR
-  T[Internal team] --> UI[Next.js App Router]
-  C[Client user] --> UI
-  UI --> V[Zod validators]
-  V --> S[Services<br/>RBAC + project access]
+  T[Equipe interna] --> UI[Next.js App Router]
+  C[Usuário cliente] --> UI
+  UI --> V[Validadores Zod]
+  V --> S[Services<br/>RBAC + acesso ao projeto]
   S --> R[Repositories<br/>Prisma]
   R --> DB[(PostgreSQL)]
-  S --> AL[Audit log]
+  S --> AL[Log de auditoria]
   S --> BL[(Blob storage)]
-  S --> OB[E-mail outbox]
-  S --> PUB["Public read endpoint<br/>allowlist + double gate"]
-  PUB --> HZ[Public map app]
+  S --> OB[Outbox de e-mail]
+  S --> PUB["Endpoint público de leitura<br/>allowlist + duplo gate"]
+  PUB --> HZ[App de mapa público]
 ```
 
-- **One database, two surfaces.** Internal routes create and publish; client routes read only rows with `PUBLISHED` status and `CLIENT_VISIBLE` visibility.
-- **Strict layering.** `app/` (pages, route handlers, server actions) to `validators/` (Zod contracts) to `services/` (use cases, authorization, publication) to `repositories/` (Prisma only, no presentation rules), then `AuditLog`.
-- **Write path:** UI / REST / server action, then Zod, then RBAC and project-access check, then service, then repository, then audit entry, then revalidation of the client pages.
-- **Data model:** 31 Prisma models and 18 migrations. Core entities (users, projects, project membership, programs, weekly updates, indicators, activities, documents, licence conditions with evidence and weekly tracking, notifications, audit log, vessel navigation plans) have full repository/service/route coverage.
+- **Um banco de dados, duas superfícies.** As rotas internas criam e publicam; as rotas do cliente leem apenas registros com status `PUBLISHED` e visibilidade `CLIENT_VISIBLE`.
+- **Camadas rígidas.** `app/` (páginas, route handlers, server actions) -> `validators/` (contratos Zod) -> `services/` (casos de uso, autorização, publicação) -> `repositories/` (somente Prisma, sem regras de apresentação) -> `AuditLog`.
+- **Caminho de escrita:** UI / REST / server action, depois Zod, depois verificação de RBAC e de acesso ao projeto, depois service, depois repository, depois registro de auditoria, depois revalidação das páginas do cliente.
+- **Modelo de dados:** 31 modelos Prisma e 18 migrations. As entidades centrais (usuários, projetos, vínculo com projetos, programas, atualizações semanais, indicadores, atividades, documentos, condicionantes de licença com evidências e acompanhamento semanal, notificações, log de auditoria, planos de navegação de embarcações) têm cobertura completa de repository/service/rota.
 
-## Key engineering decisions
+## Principais decisões de engenharia
 
-- **Authorization is enforced in the service layer, not the UI.** The edge proxy does a route-level check, but every service and route handler re-checks role permission and project membership (`requirePermission` / `requireProjectAccess`). Project access is a many-to-many `ProjectMember` table; there is one "current project" mechanism (a cookie set through an authenticated endpoint) reused everywhere instead of parallel context systems.
-- **Four roles with separated duties.** Admin, environmental team (writes content), reviewer (reviews and publishes, cannot author) and client (reads published content for linked projects).
-- **Explicit publication lifecycle.** `DRAFT -> IN_REVIEW -> PUBLISHED -> ARCHIVED`. Publishing stamps `publishedAt`, writes an audit entry and revalidates client pages; later drafts stay invisible until republished.
-- **One deliberately public endpoint, built as an allowlist.** A separate public map application reads vessel operation plans through an unauthenticated endpoint. It lives in its own service file with no auth imports, so its openness is visibly intentional. Rows must pass a double gate (`publicationStatus = PUBLISHED` and `publicVisibility = PUBLISHED_PUBLIC`), and the repository `select` names every returned field, so a new column cannot leak by default. The DTO shape is pinned by tests on both sides after a real contract mismatch (flat vs nested vessel object) broke the consumer silently.
-- **Transactional e-mail through an outbox.** Every message is first stored with a unique deduplication key (at most one row per logical event, however often a request is retried), then sent through Microsoft Graph. Without configured credentials the row ends as `SKIPPED` and nothing leaves the server, which is the safe default for development.
-- **Pluggable file storage.** A small `StorageProvider` interface (save/read/delete) with a local implementation and an Azure Blob implementation; tests run against Azurite.
-- **Narrow database fallback.** Read paths on the client side use a wrapper that falls back to local reference data only on known connection, authentication, timeout or missing-schema errors, in development or demo mode. Unexpected errors propagate, and no administrative mutation ever uses the fallback.
-- **Spreadsheet readers as tested, pure modules.** Field teams' weekly spreadsheets are parsed by per-program readers (exceljs), each with its own test file, instead of a generic importer.
-- **In-app assistant constrained by the same authorization.** The assistant (Vercel AI SDK, tool calling) only answers through server-side tools that re-check permission and project access per call, and has a hard ceiling of four model steps per message. It never uses the public projection to answer about a specific project.
-- **Honest empty states over filler.** Modules without real data render an explicit empty state; demo fixtures are isolated behind a visible banner and role gate.
-- **Security basics:** bcrypt (cost 12) password hashes, JWT sessions capped at eight hours, a Content-Security-Policy header, and bilingual UI (pt-BR / en) with a custom dictionary system that keeps key parity between languages.
+- **A autorização é aplicada na camada de serviço, não na UI.** O proxy de borda faz uma verificação por rota, mas cada service e route handler verifica novamente a permissão do papel e o vínculo com o projeto (`requirePermission` / `requireProjectAccess`). O acesso a projetos é uma tabela muitos-para-muitos `ProjectMember`; existe um único mecanismo de "projeto atual" (um cookie definido por um endpoint autenticado), reutilizado em todo lugar em vez de sistemas de contexto paralelos.
+- **Quatro papéis com funções separadas.** Admin, equipe ambiental (escreve conteúdo), revisor (revisa e publica, não pode ser autor) e cliente (lê conteúdo publicado dos projetos vinculados).
+- **Ciclo de publicação explícito.** `DRAFT -> IN_REVIEW -> PUBLISHED -> ARCHIVED`. Publicar registra `publishedAt`, grava uma entrada de auditoria e revalida as páginas do cliente; rascunhos posteriores continuam invisíveis até serem republicados.
+- **Um único endpoint deliberadamente público, construído como allowlist.** Uma aplicação separada de mapa público lê planos de operação de embarcações por meio de um endpoint sem autenticação. Ele fica em um arquivo de serviço próprio, sem imports de autenticação, para que sua abertura seja visivelmente intencional. Os registros precisam passar por um duplo gate (`publicationStatus = PUBLISHED` e `publicVisibility = PUBLISHED_PUBLIC`), e o `select` do repository nomeia cada campo retornado, de modo que uma coluna nova não vaza por padrão. O formato do DTO é fixado por testes dos dois lados depois que uma divergência real de contrato (objeto de embarcação plano vs. aninhado) quebrou o consumidor silenciosamente.
+- **E-mail transacional por meio de um outbox.** Cada mensagem é primeiro armazenada com uma chave de deduplicação única (no máximo um registro por evento lógico, por mais que uma requisição seja repetida) e depois enviada pelo Microsoft Graph. Sem credenciais configuradas, o registro termina como `SKIPPED` e nada sai do servidor, que é o padrão seguro para desenvolvimento.
+- **Armazenamento de arquivos plugável.** Uma pequena interface `StorageProvider` (save/read/delete) com uma implementação local e uma implementação Azure Blob; os testes rodam contra o Azurite.
+- **Fallback de banco de dados restrito.** Os caminhos de leitura do lado do cliente usam um wrapper que recorre a dados de referência locais apenas em erros conhecidos de conexão, autenticação, timeout ou schema ausente, em modo de desenvolvimento ou demonstração. Erros inesperados são propagados, e nenhuma mutação administrativa usa o fallback.
+- **Leitores de planilha como módulos puros e testados.** As planilhas semanais das equipes de campo são processadas por leitores específicos de cada programa (exceljs), cada um com seu próprio arquivo de teste, em vez de um importador genérico.
+- **Assistente no app limitado pela mesma autorização.** O assistente (Vercel AI SDK, tool calling) só responde por meio de ferramentas no servidor que verificam novamente permissão e acesso ao projeto a cada chamada, e tem um teto rígido de quatro passos de modelo por mensagem. Ele nunca usa a projeção pública para responder sobre um projeto específico.
+- **Estados vazios em vez de dados sintéticos.** Módulos sem dados reais exibem um estado vazio explícito; fixtures de demonstração ficam isoladas atrás de um banner visível e de um controle por papel.
+- **Baseline de segurança:** hashes de senha com bcrypt (custo 12), sessões JWT limitadas a oito horas, um cabeçalho Content-Security-Policy e interface bilíngue (pt-BR / en) com um sistema de dicionários próprio que mantém a paridade de chaves entre os idiomas.
 
 ## Stack
 
 - Next.js 16.2 (App Router), React 19, TypeScript, Tailwind CSS 4
 - PostgreSQL, Prisma 7 (`@prisma/adapter-pg`)
-- Auth.js (next-auth v5 beta): credentials provider, Microsoft Entra ID provider wired but not yet rolled out
+- Auth.js (next-auth v5 beta): provedor de credenciais; provedor Microsoft Entra ID configurado, mas ainda não liberado
 - Zod 4, React Hook Form
-- exceljs (spreadsheet parsing), unpdf (PDF text), Recharts, MapLibre GL
-- Vercel AI SDK with Google and Groq providers (assistant)
+- exceljs (leitura de planilhas), unpdf (texto de PDF), Recharts, MapLibre GL
+- Vercel AI SDK com provedores Google e Groq (assistente)
 - Azure Blob Storage SDK, Microsoft Graph `sendMail` (via HTTPS)
-- Dev and test: Vitest, Playwright, embedded-postgres (local database), Azurite (local blob emulator), ESLint
+- Desenvolvimento e testes: Vitest, Playwright, embedded-postgres (banco local), Azurite (emulador local de blob), ESLint
 
-## Testing and quality
+## Testes e qualidade
 
-- **67 Vitest test files** (count at the 18 Nov 2026 audit snapshot), covering services, publication workflow, authorization helpers, the public DTO, the e-mail outbox, storage providers and each spreadsheet reader. One integration test needs the local embedded Postgres and is expected to fail without it.
-- **8 Playwright end-to-end scripts** used as smoke checks against a running instance.
-- A GitHub Actions workflow runs lint, typecheck, unit tests and a production build on pushes to `main` and on pull requests.
-- Not yet covered: end-to-end tests are scripts, not a CI-gated suite.
+- **67 arquivos de teste Vitest** (contagem no snapshot da auditoria de 18 nov 2026), cobrindo services, fluxo de publicação, helpers de autorização, o DTO público, o outbox de e-mail, os provedores de armazenamento e cada leitor de planilha. Um teste de integração precisa do Postgres embarcado local e deve falhar sem ele.
+- **8 scripts end-to-end com Playwright** usados como smoke checks contra uma instância em execução.
+- Um workflow do GitHub Actions roda lint, typecheck, testes unitários e um build de produção em pushes para `main` e em pull requests.
+- Ainda não coberto: os testes end-to-end são scripts, não uma suíte obrigatória no CI.
 
 ## Status
 
-In production on Azure App Service (Linux, Node 22) with Azure Database for PostgreSQL and Blob Storage. The deployment history in the repository starts in August 2026. Actively developed.
+Em produção no Azure App Service (Linux, Node 22), com Azure Database for PostgreSQL e Blob Storage. O histórico de deploys no repositório começa em agosto de 2026. Em desenvolvimento ativo.
 
-Known gaps, stated plainly:
+Lacunas conhecidas:
 
-- 12 of the 31 models are modelled in the schema but have no application code writing to them yet.
-- The `APPROVED` status exists in the enum but no code path reaches it, so in practice only admins publish.
-- The spreadsheet import "analyze" endpoint previews but does not persist.
-- Single sign-on with the corporate identity provider is wired but pending rollout.
+- 12 dos 31 modelos estão modelados no schema, mas ainda não têm código da aplicação gravando neles.
+- O status `APPROVED` existe no enum, mas nenhum caminho de código chega a ele, então na prática só administradores publicam.
+- O endpoint "analyze" de importação de planilhas gera uma prévia, mas não persiste.
+- O login único com o provedor de identidade corporativo está configurado, mas aguarda liberação.
 
-## What is intentionally omitted
+## O que foi omitido intencionalmente
 
-- **Source code.** It is the employer's property and contains domain logic specific to its contracts.
-- **Client and project names, licence documents, monitoring data.** These are confidential and some are regulatory records.
-- **Infrastructure identifiers** (resource names, domains, connection settings). They have no portfolio value and only increase attack surface.
-- **Screenshots** of real client pages, for the same reason. Sanitized screenshots may be added later.
+- **Código-fonte.** É propriedade do empregador e contém lógica de domínio específica dos seus contratos.
+- **Nomes de clientes e projetos, documentos de licença, dados de monitoramento.** São confidenciais, e alguns são registros regulatórios.
+- **Identificadores de infraestrutura** (nomes de recursos, domínios, configurações de conexão). Não têm valor para portfólio e só aumentam a superfície de ataque.
+- **Capturas de tela** de páginas reais de clientes, pelo mesmo motivo. Capturas sanitizadas podem ser adicionadas depois.
 
-## Lessons and next steps
+## Lições e próximos passos
 
-- **Deployment is manual.** Build locally, package the standalone output, upload a zip. It is documented and repeatable, but it should become a CI pipeline with a deploy approval step.
-- **Branch hygiene.** Most work happens on long-lived feature branches; `main` is far behind, which weakens the CI workflow that targets it. Consolidating branches is the first next step.
-- **Close the schema/code gap** (persist imports, implement the remaining models or drop them) and add the missing `APPROVED` transition.
-- **Make the E2E scripts a CI-gated suite** against an ephemeral database.
-- **What worked:** putting authorization in the service layer from day one, and treating the one public endpoint as an explicit allowlist with tests on the contract, made adding a second public consumer cheap and safe.
+- **O deploy é manual.** Build local, empacotamento da saída standalone, upload de um zip. É documentado e repetível, mas deveria virar um pipeline de CI com etapa de aprovação de deploy.
+- **Higiene de branches.** A maior parte do trabalho acontece em branches de feature de longa duração; a `main` está bem atrás, o que enfraquece o workflow de CI que a tem como alvo. Consolidar as branches é o primeiro próximo passo.
+- **Fechar a lacuna entre schema e código** (persistir importações, implementar os modelos restantes ou removê-los) e adicionar a transição `APPROVED` que falta.
+- **Transformar os scripts E2E em uma suíte obrigatória no CI**, rodando contra um banco efêmero.
+- **O que funcionou:** colocar a autorização na camada de serviço desde o primeiro dia, e tratar o único endpoint público como uma allowlist explícita com testes sobre o contrato, tornou barato e seguro adicionar um segundo consumidor público.
 
-More detail on specific decisions: [docs/decisions.md](docs/decisions.md).
+Mais detalhes sobre decisões específicas: [docs/decisoes.md](docs/decisoes.md).
