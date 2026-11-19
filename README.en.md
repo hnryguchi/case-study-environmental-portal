@@ -4,7 +4,7 @@
 
 A multi-tenant web portal where an environmental team drafts, reviews and publishes monitoring content, and each client sees only what was published for its own projects.
 
-Built during my work at Toveri, an environmental consultancy that monitors offshore operations. Documentation only: no source code, client names, data or infrastructure identifiers.
+Built during my work at [Toveri](https://toveri.com.br), an environmental consultancy that monitors offshore operations. Documentation only: no source code, client names, data or infrastructure identifiers.
 
 > This repository is documentation only. The source code, data and infrastructure belong to the employer and are not published here. See [What is intentionally omitted](#what-is-intentionally-omitted).
 
