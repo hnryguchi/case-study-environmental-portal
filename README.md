@@ -104,3 +104,7 @@ Lacunas conhecidas:
 - **O que funcionou:** colocar a autorização na camada de serviço desde o primeiro dia, e tratar o único endpoint público como uma allowlist explícita com testes sobre o contrato, tornou barato e seguro adicionar um segundo consumidor público.
 
 Mais detalhes sobre decisões específicas: [docs/decisoes.md](docs/decisoes.md).
+
+---
+
+> © Henry Noguchi. **Todos os direitos reservados.** Repositório público só para leitura; copiar, reutilizar ou apresentar como próprio exige autorização. Ver [LICENSE](LICENSE).

@@ -104,3 +104,7 @@ Known gaps:
 - **What worked:** putting authorization in the service layer from day one, and treating the one public endpoint as an explicit allowlist with tests on the contract, made adding a second public consumer cheap and safe.
 
 More detail on specific decisions: [docs/decisions.md](docs/decisions.md).
+
+---
+
+> © Henry Noguchi. **All rights reserved.** Public for viewing only; copying, reuse or presenting it as your own requires permission. See [LICENSE](LICENSE).
